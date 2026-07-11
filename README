@@ -1,0 +1,25 @@
+VVIf you want the cleaner version going forward, use su - t9amail (with the dash) — that loads t9amail's own environment and drops you in /home/t9amail automatically.
+T9AMAIL
+
+Project to provide a web-based email 'client' for use on HMD feature phone.
+Main limit is Opera Mini Extreme mode.
+Cannot realistically browse to likes of www.gmail
+Solution: web page interface optimised for Opera Mini and 2.4" screen
+Framework: 
+- mbsync runs (cron) and stores a persistent  INBOX on vps
+- bottle + scripts render a usable html interface
+- IMAP calls only required for sending mail
+- mail service: posteo
+∗∗∗∗∗∗∗∗∗∗∗∗∗
+
+
+# mbsync posteo to local (see ~/.mbsyncrc) 
+- include ~/Mail/Inbox/cur & new
+
+# REPLY
+- browse inboxes
+- create RFC.eml from selected UID 
+- send with msmtp < RFC.eml
+
+# see ~/.msmtprc
+
