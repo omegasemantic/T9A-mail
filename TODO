@@ -1,0 +1,100 @@
+# T9AMAIL — TODO
+
+## DO NOW — commit, then merge webproto into real app.py
+
+**1. Commit current state first, before any further changes.**
+Real `app.py` untouched (still the minimal `/`, `/test`, `/sendtest`
+version), `webproto/` present with the proven nav+reply+send
+prototype, this TODO.md included.
+
+```
+git add -A
+git commit -m "Rollback point: webproto/ proven working (nav + real reply + real send), real app.py not yet merged"
+git tag pre-webproto-merge
+git push && git push --tags
+```
+
+The tag matters: repo history was already force-reset once before
+(see handover v3) — a named tag makes "roll back to before the merge"
+a one-command `git checkout pre-webproto-merge` rather than hunting
+through `git log` for the right commit.
+
+**2. Merge webproto/app.py's logic into the real app.py**, in place,
+still binding port 80. As part of this same pass:
+- Delete the stale `/sendtest` route (dead SMTP/msmtp code, superseded
+  by Resend — see handover v3, "Sending mail" section).
+- Delete `/test` (served its purpose proving the subprocess-from-Bottle
+  pattern; no longer needed once real routes exist).
+- Carry over: `/`, `/message`, `/view`, `/reply` (GET+POST), all real
+  paths (headers.txt, MAILDIRS, send_json.sh subprocess call) already
+  proven in webproto/app.py.
+
+**3. Keep `webproto/` around for one more cycle** after the merge —
+don't delete it in the same commit. It's the working reference/proof
+of correctness if anything looks off in the merged version. Delete it
+in a later, separate commit once the merged real app.py has been
+confirmed solid (a few real days of use, or a specific test pass —
+your call on the bar).
+
+**4. Commit the merge separately**, clearly distinguished from the
+rollback point commit above — e.g.
+`git commit -m "Merge webproto nav/reply/send into real app.py, remove stale /test and /sendtest"`.
+
+**5. Restart the real systemd service** (`t9amail-web.service`) once
+the merge is deployed to the VPS via `git pull`, so it picks up the
+new `app.py`.
+
+---
+
+## LATER — compose_new (deferred, not started)
+
+Reply flow (now proven end-to-end with real send) is NOT to be used as
+a template by copy-paste — compose_new is a genuinely different input
+shape, converging on the same send step. Design already agreed,
+captured here so it doesn't need re-deriving:
+
+- **No mail.raw involved.** Reply derives to/subject/In-Reply-To/
+  References from an existing message via `derive_reply_fields()`.
+  compose_new has no prior message — to/subject are typed directly
+  by the user, no threading headers at all (In-Reply-To/References
+  don't apply — not blank, just absent).
+
+- **New routes, not a variant of existing ones:** `GET /compose` (blank
+  form: To, Subject, body) and `POST /compose`. Does not touch
+  `find_entry`, `generate_raw`, or `derive_reply_fields` — those are
+  reply-specific by definition.
+
+- **Converges on the same send step.** Both reply and compose_new end
+  up building the same payload shape:
+  ```
+  {"from": ..., "to": [...], "subject": ..., "text": ...,
+   "headers": {"In-Reply-To": ..., "References": ...}}  # reply only
+  ```
+  compose_new's payload just omits the "headers" block entirely.
+  Both call the same `send_json.sh` via the same subprocess pattern
+  already proven in `/reply` POST — no new send logic needed.
+
+- **Open question, not yet resolved:** does compose_new need any kind
+  of address input helper (recent contacts, etc.) given hand-typing a
+  full email address on a T9 keypad is a real usability problem — or
+  is plain hand-typing acceptable for now? Flagged during design
+  discussion, deliberately not solved yet — reply.sh sidesteps this
+  entirely since To is always derived, so this is compose_new's own
+  problem to solve, not inherited from reply.
+
+- **Shared helper file** (mail_helpers.sh-style, for reply.sh /
+  compose_new.sh if they end up needing common code) — deliberately
+  NOT created preemptively. Wait until compose_new exists as real code
+  and actual duplication is visible, then extract only what's genuinely
+  shared. Reasoning: extracting "common" logic from a single existing
+  implementation (reply.sh alone) risks premature abstraction.
+
+## Known gaps carried over from handover v3 (not re-derived here, still open)
+
+- Filter 2 doesn't yet handle base64-encoded bodies or genuine
+  multipart/alternative MIME messages (prefer text/plain part).
+- Read-flag ("mark as read") sync — deliberately not implemented,
+  decision documented in handover v3, not to be revisited without a
+  new reason.
+- gmap migration into T9A/maps/ — folder scaffolded, still pending,
+  lower priority than mail.

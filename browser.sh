@@ -1,5 +1,7 @@
 #!/bin/bash
 # browse.sh
+source "$HOME/.t9arc"
+export timezone
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/mail_helpers.sh"
 HEADERS="$SCRIPT_DIR/headers.txt"

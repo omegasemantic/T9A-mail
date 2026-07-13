@@ -38,19 +38,21 @@ except Exception:
 
 # Reformat an RFC 5322 date string into something shorter for display.
 # "Thu, 9 Jul 2026 08:04:16 +1200" -> "9 Jul 2026, 8:04am"
-# Falls back to the original string if it can't be parsed.
+
 trim_date() {
     local raw="$1"
+    local tz="${timezone:-Pacific/Auckland}"
     if command -v python3 >/dev/null 2>&1; then
         echo "$raw" | python3 -c "
-import sys
+import sys, os
 from email.utils import parsedate_to_datetime
+from zoneinfo import ZoneInfo
 raw = sys.stdin.read().strip()
+tz = os.environ.get('tz', 'Pacific/Auckland')
 try:
     dt = parsedate_to_datetime(raw)
-    hour12 = dt.strftime('%-I')
-    ampm = 'am' if dt.hour < 12 else 'pm'
-    print(dt.strftime(f'%-d %b %Y, {hour12}:%M') + ampm)
+    dt_local = dt.astimezone(ZoneInfo(tz))
+    print(dt_local.strftime('%-d %b %Y, %H:%M'))
 except Exception:
     print(raw)
 " 2>/dev/null
@@ -58,3 +60,4 @@ except Exception:
         echo "$raw"
     fi
 }
+

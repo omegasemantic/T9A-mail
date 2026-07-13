@@ -3,4 +3,4 @@
    mbsync posteo
    "$SCRIPT_DIR/pager.sh" > "$SCRIPT_DIR/headers.txt"
    "$SCRIPT_DIR/browser.sh"
-   "$SCRIPT_DIR/rawmail2md.sh" && cat body.md
+#   "$SCRIPT_DIR/rawmail2md.sh" 
