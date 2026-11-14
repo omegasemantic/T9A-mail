@@ -2,3 +2,5 @@ headers.txt
 mail.raw
 body.md
 request.json
+sync_cron.log
+venv/

@@ -3,7 +3,6 @@
 # Shared field-cleaning functions for the View module.
 # Source this file, don't execute it directly:
 #   source ./mail_helpers.sh
-
 # Strip angle-bracket address from a From header, keep display name if present.
 # "Simon Kearns <simon@example.com>" -> "Simon Kearns"
 # "<service@kiwibank.co.nz>"         -> "service@kiwibank.co.nz"  (falls back to bare address)
@@ -16,7 +15,6 @@ clean_from() {
     fi
     echo "$clean"
 }
-
 # Decode RFC 2047 encoded-word subjects, e.g. =?utf-8?Q?...?=
 # Falls back to the original string if decoding fails or python3 unavailable.
 decode_subject() {
@@ -35,15 +33,13 @@ except Exception:
         echo "$raw"
     fi
 }
-
 # Reformat an RFC 5322 date string into something shorter for display.
-# "Thu, 9 Jul 2026 08:04:16 +1200" -> "9 Jul 2026, 8:04am"
-
+# "Thu, 9 Jul 2026 08:04:16 +1200" -> "WED 15/07/26 0804"
 trim_date() {
     local raw="$1"
     local tz="${timezone:-Pacific/Auckland}"
     if command -v python3 >/dev/null 2>&1; then
-        echo "$raw" | python3 -c "
+        echo "$raw" | tz="$tz" python3 -c "
 import sys, os
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
@@ -52,7 +48,7 @@ tz = os.environ.get('tz', 'Pacific/Auckland')
 try:
     dt = parsedate_to_datetime(raw)
     dt_local = dt.astimezone(ZoneInfo(tz))
-    print(dt_local.strftime('%-d %b %Y, %H:%M'))
+    print(dt_local.strftime('%a').upper() + dt_local.strftime(' %d/%m/%y %H%M'))
 except Exception:
     print(raw)
 " 2>/dev/null
@@ -60,4 +56,3 @@ except Exception:
         echo "$raw"
     fi
 }
-

@@ -1,5 +1,5 @@
 from bottle import Bottle, request, redirect, response, static_file
-import os, re, quopri, json, subprocess
+import os, re, quopri, json, subprocess, html
 from email import message_from_string
 from email.utils import parseaddr
 from email.header import decode_header
@@ -17,14 +17,17 @@ REQUEST_JSON = os.path.join(SCRIPT_DIR, "request.json")
 SEND_SCRIPT = os.path.join(SCRIPT_DIR, "send_json.sh")
 FROM_ADDR = "hello@omegasemantic.org"
 
+SWITCH_SERVICES = {
+    'mail': 't9amail-web.service',
+    'map': 't9amap-web.service',
+    'drive': 't9adrive-web.service',
+}
+RESTART_SCRIPT = '/root/restart'
+
 app = Bottle()
 
 
 def decode_mime_subject(raw_subject):
-    """RFC 2047 decode (=?utf-8?Q?...?= etc.) — mirrors mail_helpers.sh's
-    decode_subject. headers.txt stores subjects as pager.sh wrote them,
-    which is the raw encoded form; this decodes for display, same as
-    browser.sh already does via mail_helpers.sh."""
     if not raw_subject:
         return raw_subject
     try:
@@ -35,16 +38,10 @@ def decode_mime_subject(raw_subject):
         )
         return decoded
     except Exception:
-        # Fail soft — show the raw string rather than crashing the
-        # whole list/message page over one malformed subject.
         return raw_subject
 
 
 def parse_headers():
-    """Parse headers.txt into an ordered list of dicts, oldest first —
-    same order/format browser.sh already assumes (last entry = most
-    recent). Re-read fresh on every call: headers.txt is a snapshot,
-    not something to cache or hold across requests."""
     entries = []
     current = {}
     with open(HEADERS_FILE) as f:
@@ -69,10 +66,6 @@ def parse_headers():
 
 
 def find_entry(uid):
-    """Locate a UID's entry and its neighbours in the current
-    headers.txt order. Returns (entry, older_uid, newer_uid) or
-    (None, None, None) if the UID isn't present — e.g. a stale link
-    to a message no longer in the current snapshot."""
     entries = parse_headers()
     for i, e in enumerate(entries):
         if e["uid"] == uid:
@@ -83,8 +76,6 @@ def find_entry(uid):
 
 
 def generate_raw(uid):
-    """Find the real message file for this UID, checking both cur/ and
-    new/ — mirrors browser.sh's generate_raw exactly."""
     for maildir in MAILDIRS:
         if not os.path.isdir(maildir):
             continue
@@ -99,9 +90,62 @@ def generate_raw(uid):
     return None
 
 
+def _decode_part_payload(part):
+    """Decode a single message/part's payload to text, honouring its own
+    Content-Transfer-Encoding and charset."""
+    try:
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            return ""
+        charset = part.get_content_charset() or "utf-8"
+        return payload.decode(charset, errors="replace")
+    except Exception:
+        return ""
+
+
+def _strip_html(text):
+    text = re.sub(r"<br[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]*>", "", text)
+    return text
+
+
 def render_body(raw):
-    """Mirrors browser.sh's render_body: decode quoted-printable if
-    declared, strip HTML tags if content-type is text/html."""
+    """Render a raw RFC 5322 message to safe, displayable HTML.
+
+    Walks MIME structure properly: for multipart/alternative, prefers the
+    text/plain part and renders it directly (no tag-stripping needed).
+    Falls back to the text/html part (stripped) if no usable plain part
+    exists, and finally falls back to the old single-part behaviour for
+    non-multipart messages.
+    """
+    msg = message_from_string(raw)
+
+    if msg.is_multipart():
+        plain_part = None
+        html_part = None
+        for part in msg.walk():
+            if part.is_multipart():
+                continue
+            ctype = part.get_content_type()
+            if ctype == "text/plain" and plain_part is None:
+                plain_part = part
+            elif ctype == "text/html" and html_part is None:
+                html_part = part
+
+        if plain_part is not None:
+            body = _decode_part_payload(plain_part).strip()
+            body = html.escape(body)
+        elif html_part is not None:
+            body = _decode_part_payload(html_part).strip()
+            body = _strip_html(body)
+            body = html.escape(body)
+        else:
+            body = "(no displayable part found in this message)"
+
+        body = body.replace("\n", "<br>\n")
+        return body
+
+    # Non-multipart fallback (original single-part logic)
     headers, _, body = raw.partition("\n\n")
     encoding = ""
     content_type = ""
@@ -114,24 +158,23 @@ def render_body(raw):
     if "quoted-printable" in encoding.lower():
         body = quopri.decodestring(body.encode()).decode("utf-8", errors="replace")
 
-    if "text/html" in content_type.lower():
-        body = re.sub(r"<br[^>]*>", "\n", body, flags=re.IGNORECASE)
-        body = re.sub(r"<[^>]*>", "", body)
+    body = body.strip()
 
-    return body.strip()
+    if "text/html" in content_type.lower():
+        body = _strip_html(body)
+        body = html.escape(body)
+    else:
+        body = html.escape(body)
+
+    body = body.replace("\n", "<br>\n")
+    return body
 
 
 def unfold(value):
-    # RFC 5322 header folding: long values can be split across lines
-    # with continuation whitespace. Resend rejects embedded \n in
-    # header values outright — a real bug found and fixed during
-    # testing (see TODO/handover).
     return " ".join((value or "").split())
 
 
 def derive_reply_fields(raw):
-    """Header derivation for a reply: to/subject/In-Reply-To/References
-    from the original message's mail.raw content."""
     msg = message_from_string(raw)
 
     _, to_addr = parseaddr(msg.get("From", ""))
@@ -149,60 +192,90 @@ def derive_reply_fields(raw):
 
 
 def page(title, body_html):
-    """Minimal wrapper, no CSS — matches the project's proven Opera
-    Extreme rendering (plain text/basic HTML, styling is stripped
-    anyway)."""
-    return f"<html><head><title>{title}</title></head><body>{body_html}</body></html>"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{title}</title>
+<style>body {{ overflow-wrap: anywhere; }}</style>
+</head>
+<body>
+{body_html}
+</body>
+</html>"""
 
 
 @app.route("/")
+def root():
+    return list_messages()
+
+
+@app.route("/list")
 def list_messages():
     entries = parse_headers()
     rows = []
-    for e in reversed(entries):  # most recent first, matches browser.sh's start position
+    for e in reversed(entries):
         flag = " (N)" if e["status"] == "unread" else ""
         warn = " !" if e.get("warning") else ""
         rows.append(
-            f'<p><a href="/message?uid={e["uid"]}">{e["from"]} — {e["subject"]}{flag}{warn}</a><br>'
+            f'<p><a href="/message?uid={e["uid"]}">{e["from"]} \u2014 {e["subject"]}{flag}{warn}</a><br>'
             f'{e["date"]}</p>'
         )
-    return page("Inbox", "<h3>Inbox</h3>" + "".join(rows))
+    return page("Inbox", '<p><a href="/ticket.html">switcher</a></p><h3>Inbox</h3>' + "".join(rows))
 
 
 @app.route("/hello.html")
 def hello():
-    # Retained from the original placeholder app.py — harmless, not
-    # part of the real nav chain, no reason to force its removal.
     return static_file('hello.html', root='./static')
+
+
+@app.route("/ticket.html")
+def ticket_page():
+    return static_file('ticket.html', root=os.path.join(SCRIPT_DIR, 'static'))
+
+
+@app.route('/switch/<name>', method='POST')
+def switch(name):
+    if name not in SWITCH_SERVICES:
+        return "unknown service"
+    subprocess.Popen(['systemd-run', '--unit=t9aswitch', RESTART_SCRIPT, name])
+    return '<p>Switching... <a href="/">Wait a few seceonds then click to reload></p>'
+
+
+@app.route("/test/<filename>")
+def design_sandbox(filename):
+    return static_file(filename, root='./static/test')
 
 
 @app.route("/message")
 def message_view():
     uid = request.query.uid
+    return message_view_content(uid)
+
+
+def message_view_content(uid):
     entry, older, newer = find_entry(uid)
     if not entry:
         response.status = 404
-        return page("Not found", f"<p>UID {uid} not found in current headers.txt.</p><p><a href='/'>Back to list</a></p>")
+        return page("Not found", f"<p>UID {uid} not found in current headers.txt.</p>")
 
-    warn = f"<p>Warning: {entry['warning']}</p>" if entry.get("warning") else ""
+    warn = f"<p><strong>Warning: {entry['warning']}</strong></p>" if entry.get("warning") else ""
     flag = " (N)" if entry["status"] == "unread" else ""
 
-    nav = []
+    nav_links = []
     if older:
-        nav.append(f'<a href="/message?uid={older}">[older]</a>')
+        nav_links.append(f'<a href="/message?uid={older}">[old]</a>')
     if newer:
-        nav.append(f'<a href="/message?uid={newer}">[newer]</a>')
-    nav_html = " ".join(nav)
+        nav_links.append(f'<a href="/message?uid={newer}">[new]</a>')
+    nav_links.append('<a href="/list">[list]</a>')
 
     body = f"""
-    <h3>UID: {entry['uid']}{flag}</h3>
-    <p>From: {entry['from']}<br>
-    Subject: {entry['subject']}<br>
-    Date: {entry['date']}</p>
+    <p><strong>From:</strong> {entry['from']}<br>
+    <strong>Subject:</strong> {entry['subject']}{flag}<br>
+    <strong>Date:</strong> {entry['date']}</p>
     {warn}
-    <p><a href="/view?uid={uid}">[view]</a> <a href="/reply?uid={uid}">[reply]</a></p>
-    <p>{nav_html}</p>
-    <p><a href="/">[list]</a></p>
+    <p><a href="/view?uid={uid}">[view]</a> | <a href="/reply?uid={uid}">[reply]</a></p>
+    <p>{" | ".join(nav_links)}</p>
     """
     return page(f"Message {uid}", body)
 
@@ -213,7 +286,7 @@ def view_body():
     entry, older, newer = find_entry(uid)
     if not entry:
         response.status = 404
-        return page("Not found", f"<p>UID {uid} not found.</p><p><a href='/'>Back to list</a></p>")
+        return page("Not found", f"<p>UID {uid} not found.</p>")
 
     raw = generate_raw(uid)
     if raw is None:
@@ -221,22 +294,11 @@ def view_body():
     else:
         rendered = render_body(raw)
 
-    nav = []
-    if older:
-        nav.append(f'<a href="/view?uid={older}">[older]</a>')
-    if newer:
-        nav.append(f'<a href="/view?uid={newer}">[newer]</a>')
-    nav_html = " ".join(nav)
-
     body = f"""
-    <h3>From: {entry['from']}</h3>
-    <p>Subject: {entry['subject']}</p>
-    <hr>
-    <pre>{rendered}</pre>
-    <hr>
-    <p><a href="/reply?uid={uid}">[reply]</a></p>
-    <p>{nav_html}</p>
-    <p><a href="/message?uid={uid}">[back to message]</a> <a href="/">[list]</a></p>
+    <p><strong>From:</strong> {entry['from']}<br>
+    <strong>Subject:</strong> {entry['subject']}</p>
+    <p>{rendered}</p>
+    <p><a href="/reply?uid={uid}">[reply]</a> | <a href="/message?uid={uid}">[back to message]</a></p>
     """
     return page(f"View {uid}", body)
 
@@ -247,20 +309,20 @@ def reply_form():
     entry, _, _ = find_entry(uid)
     if not entry:
         response.status = 404
-        return page("Not found", f"<p>UID {uid} not found.</p><p><a href='/'>Back to list</a></p>")
+        return page("Not found", f"<p>UID {uid} not found.</p>")
 
     raw = generate_raw(uid)
     if raw is None:
-        return page("Error", f"<p>No message file found for UID {uid} — cannot reply.</p><p><a href='/message?uid={uid}'>[back]</a></p>")
+        return page("Error", f"<p>No message file found for UID {uid} -- cannot reply.</p><p><a href='/message?uid={uid}'>[cancel]</a></p>")
 
     to_addr, subject, in_reply_to, references = derive_reply_fields(raw)
 
     body = f"""
-    <h3>Reply to: {to_addr}</h3>
-    <p>Subject: {subject}</p>
+    <p><strong>Reply to:</strong> {to_addr}<br>
+    <strong>Subject:</strong> {subject}</p>
     <form action="/reply" method="POST">
         <input type="hidden" name="uid" value="{uid}">
-        <textarea name="body" rows="6" cols="30" placeholder="Your reply..."></textarea>
+        <textarea name="body" rows="6" placeholder=""></textarea>
         <br><br>
         <input type="submit" value="Send">
     </form>
@@ -275,11 +337,11 @@ def reply_submit():
     reply_body = request.forms.body
 
     if not reply_body or not reply_body.strip():
-        return page("Error", f"<p>Empty reply body — nothing sent.</p><p><a href='/reply?uid={uid}'>[back]</a></p>")
+        return page("Error", f"<p>Empty reply body -- nothing sent.</p><p><a href='/reply?uid={uid}'>[back]</a></p>")
 
     raw = generate_raw(uid)
     if raw is None:
-        return page("Error", f"<p>No message file found for UID {uid} — cannot send.</p><p><a href='/message?uid={uid}'>[back]</a></p>")
+        return page("Error", f"<p>No message file found for UID {uid} -- cannot send.</p><p><a href='/message?uid={uid}'>[back]</a></p>")
 
     to_addr, subject, in_reply_to, references = derive_reply_fields(raw)
 
@@ -303,16 +365,14 @@ def reply_submit():
     )
 
     if result.returncode == 0:
-        # On success, land back on the same message — looks like
-        # nothing happened, per the agreed nav pattern.
         redirect(f"/message?uid={uid}", code=303)
     else:
         return page("Send failed", f"""
-        <h3>Send failed</h3>
-        <pre>{result.stdout}{result.stderr}</pre>
+        <p><strong>Send failed</strong></p>
+        <p>{html.escape(result.stdout + result.stderr)}</p>
         <p><a href="/reply?uid={uid}">[try again]</a></p>
         """)
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=80)
