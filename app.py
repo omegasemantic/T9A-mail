@@ -109,6 +109,21 @@ def _strip_html(text):
     return text
 
 
+def wrap_long(text, n=25):
+    pieces = re.split(r'(\s+)', text)
+    result = []
+    for piece in pieces:
+        if re.match(r'^\s+$', piece):
+            result.append(html.escape(piece))
+        elif len(piece) > n:
+            escaped = html.escape(piece)
+            chunks = [escaped[i:i+n] for i in range(0, len(escaped), n)]
+            result.append("<wbr>".join(chunks))
+        else:
+            result.append(html.escape(piece))
+    return "".join(result)
+
+
 def render_body(raw):
     """Render a raw RFC 5322 message to safe, displayable HTML.
 
@@ -134,11 +149,11 @@ def render_body(raw):
 
         if plain_part is not None:
             body = _decode_part_payload(plain_part).strip()
-            body = html.escape(body)
+            body = wrap_long(body)
         elif html_part is not None:
             body = _decode_part_payload(html_part).strip()
             body = _strip_html(body)
-            body = html.escape(body)
+            body = wrap_long(body)
         else:
             body = "(no displayable part found in this message)"
 
@@ -162,9 +177,9 @@ def render_body(raw):
 
     if "text/html" in content_type.lower():
         body = _strip_html(body)
-        body = html.escape(body)
+        body = wrap_long(body)
     else:
-        body = html.escape(body)
+        body = wrap_long(body)
 
     body = body.replace("\n", "<br>\n")
     return body
