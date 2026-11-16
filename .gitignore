@@ -4,3 +4,4 @@ body.md
 request.json
 sync_cron.log
 venv/
+__pycache__/

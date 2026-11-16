@@ -1,25 +1,34 @@
-VVIf you want the cleaner version going forward, use su - t9amail (with the dash) — that loads t9amail's own environment and drops you in /home/t9amail automatically.
-T9AMAIL
+# T9AMAIL
 
-Project to provide a web-based email 'client' for use on HMD feature phone.
-Main limit is Opera Mini Extreme mode.
-Cannot realistically browse to likes of www.gmail
-Solution: web page interface optimised for Opera Mini and 2.4" screen
-Framework: 
-- mbsync runs (cron) and stores a persistent  INBOX on vps
-- bottle + scripts render a usable html interface
-- IMAP calls only required for sending mail
-- mail service: posteo
-∗∗∗∗∗∗∗∗∗∗∗∗∗
+Web email client for a HMD feature phone (Opera Mini Extreme, 2.4"
+screen). Part of T9A, a set of small apps for the phone; sibling apps
+live in their own repos (T9A-map, T9A-drive).
 
+Pages are plain HTML. Mail is read from a local copy, so the web app
+never makes IMAP calls.
 
-# mbsync posteo to local (see ~/.mbsyncrc) 
-- include ~/Mail/Inbox/cur & new
+## How it works
+- mbsync (cron, every 5 min, via sync_cron.sh) pulls the Posteo INBOX
+  into ~/Mail/INBOX. `MaxMessages 10` is deliberate: the app is for
+  short, conversational messages, not an archive.
+- pager.sh writes headers.txt (UID, read status, From, Subject, Date,
+  warning flag from classify_mail.py).
+- app.py (Bottle, port 80) lists, views and replies to messages.
+- Replies are built in app.py and POSTed to the Resend API by
+  send_json.sh. Sending uses HTTPS because the VPS host blocks SMTP.
+- Only one of the T9A apps holds port 80 at a time. /switch/<name>
+  runs /root/restart, which stops the others and starts the one chosen.
 
-# REPLY
-- browse inboxes
-- create RFC.eml from selected UID 
-- send with msmtp < RFC.eml
+## To rebuild on a new machine
+- Python venv with bottle: `python3 -m venv venv && venv/bin/pip install bottle`
+- ~/.resendrc containing RESEND_API_KEY=...  (never commit)
+- ~/.mbsyncrc for the Posteo account, plus the Maildir ~/Mail/INBOX
+- cron: `*/5 * * * * <path>/sync_cron.sh`
+- systemd unit t9amail-web.service (runs `venv/bin/python app.py`)
+- /root/restart, the script behind the switcher
+- optional ~/.t9arc (timezone); defaults to Pacific/Auckland
 
-# see ~/.msmtprc
-
+## Files
+app.py, send_json.sh, static/ (web app); pager.sh, classify_mail.py,
+sync_cron.sh, mail_helpers.sh (sync pipeline); browser.sh, tmail.sh,
+reply.sh (older terminal client); webproto/ (superseded prototype).
