@@ -98,3 +98,10 @@ captured here so it doesn't need re-deriving:
   new reason.
 - gmap migration into T9A/maps/ — folder scaffolded, still pending,
   lower priority than mail.
+
+  ## Status 2026-11-16
+- Repo: T9A (VPS and penguin cloned; edit on penguin, VPS only pulls)
+- mbsync state was stale -> reset (INBOX.old, state.old kept); MaxMessages 10 is deliberate
+- Next: sort by UID in parse_headers; verify reply_to; html.escape; /compose
+- Deploy: push -> pull on VPS -> ./venv/bin/python -m py_compile app.py -> switch
+- Never touch ../map ../drive; keep /switch and ticket.html
