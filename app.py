@@ -233,7 +233,7 @@ def list_messages():
         flag = " (N)" if e["status"] == "unread" else ""
         warn = " !" if e.get("warning") else ""
         rows.append(
-            f'<p><a href="/message?uid={e["uid"]}">{e["from"]} \u2014 {e["subject"]}{flag}{warn}</a><br>'
+            f'<p><a href="/message?uid={e["uid"]}">{html.escape(e["from"])} \u2014 {html.escape(e["subject"])}{flag}{warn}</a><br>'
             f'{e["date"]}</p>'
         )
     return page("Inbox", '<p><a href="/ticket.html">switcher</a></p><h3>Messages</h3>' + "".join(rows))
@@ -265,6 +265,9 @@ def design_sandbox(filename):
 @app.route("/message")
 def message_view():
     uid = request.query.uid
+    if not uid.isdigit():
+        response.status = 404
+        return page("Not found", "<p>Not found.</p>")
     return message_view_content(uid)
 
 
@@ -274,7 +277,7 @@ def message_view_content(uid):
         response.status = 404
         return page("Not found", f"<p>UID {uid} not found in current headers.txt.</p>")
 
-    warn = f"<p><strong>Warning: {entry['warning']}</strong></p>" if entry.get("warning") else ""
+    warn = f"<p><strong>Warning: {html.escape(entry['warning'])}</strong></p>" if entry.get("warning") else ""
     flag = " (N)" if entry["status"] == "unread" else ""
 
     nav_links = []
@@ -285,9 +288,9 @@ def message_view_content(uid):
     nav_links.append('<a href="/list">[list]</a>')
 
     body = f"""
-    <p><strong>From:</strong> {entry['from']}<br>
-    <strong>Subject:</strong> {entry['subject']}{flag}<br>
-    <strong>Date:</strong> {entry['date']}</p>
+    <p><strong>From:</strong> {html.escape(entry['from'])}<br>
+    <strong>Subject:</strong> {html.escape(entry['subject'])}{flag}<br>
+    <strong>Date:</strong> {html.escape(entry['date'])}</p>
     {warn}
     <p><a href="/view?uid={uid}">[view]</a> | <a href="/reply?uid={uid}">[reply]</a></p>
     <p>{" | ".join(nav_links)}</p>
@@ -298,6 +301,9 @@ def message_view_content(uid):
 @app.route("/view")
 def view_body():
     uid = request.query.uid
+    if not uid.isdigit():
+        response.status = 404
+        return page("Not found", "<p>Not found.</p>")
     entry, older, newer = find_entry(uid)
     if not entry:
         response.status = 404
@@ -310,8 +316,8 @@ def view_body():
         rendered = render_body(raw)
 
     body = f"""
-    <p><strong>From:</strong> {entry['from']}<br>
-    <strong>Subject:</strong> {entry['subject']}</p>
+    <p><strong>From:</strong> {html.escape(entry['from'])}<br>
+    <strong>Subject:</strong> {html.escape(entry['subject'])}</p>
     <p>{rendered}</p>
     <p><a href="/reply?uid={uid}">[reply]</a> | <a href="/message?uid={uid}">[back to message]</a></p>
     """
@@ -321,6 +327,9 @@ def view_body():
 @app.route("/reply")
 def reply_form():
     uid = request.query.uid
+    if not uid.isdigit():
+        response.status = 404
+        return page("Not found", "<p>Not found.</p>")
     entry, _, _ = find_entry(uid)
     if not entry:
         response.status = 404
@@ -333,8 +342,8 @@ def reply_form():
     to_addr, subject, in_reply_to, references = derive_reply_fields(raw)
 
     body = f"""
-    <p><strong>Reply to:</strong> {to_addr}<br>
-    <strong>Subject:</strong> {subject}</p>
+    <p><strong>Reply to:</strong> {html.escape(to_addr)}<br>
+    <strong>Subject:</strong> {html.escape(subject)}</p>
     <form action="/reply" method="POST">
         <input type="hidden" name="uid" value="{uid}">
         <textarea name="body" rows="6" placeholder=""></textarea>
@@ -349,6 +358,9 @@ def reply_form():
 @app.route("/reply", method="POST")
 def reply_submit():
     uid = request.forms.uid
+    if not uid.isdigit():
+        response.status = 404
+        return page("Not found", "<p>Not found.</p>")
     reply_body = request.forms.body
 
     if not reply_body or not reply_body.strip():
