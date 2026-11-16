@@ -221,7 +221,7 @@ def list_messages():
             f'<p><a href="/message?uid={e["uid"]}">{e["from"]} \u2014 {e["subject"]}{flag}{warn}</a><br>'
             f'{e["date"]}</p>'
         )
-    return page("Inbox", '<p><a href="/ticket.html">switcher</a></p><h3>Inbox</h3>' + "".join(rows))
+    return page("Inbox", '<p><a href="/ticket.html">switcher</a></p><h3>Messages</h3>' + "".join(rows))
 
 
 @app.route("/hello.html")
