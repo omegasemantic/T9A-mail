@@ -16,6 +16,7 @@ MAILRAW_OUT = os.path.join(SCRIPT_DIR, "mail.raw")
 REQUEST_JSON = os.path.join(SCRIPT_DIR, "request.json")
 SEND_SCRIPT = os.path.join(SCRIPT_DIR, "send_json.sh")
 FROM_ADDR = "hello@omegasemantic.org"
+CONTACTS_FILE = os.path.expanduser("~/.t9a_contacts")
 
 SWITCH_SERVICES = {
     'mail': 't9amail-web.service',
@@ -189,6 +190,48 @@ def unfold(value):
     return " ".join((value or "").split())
 
 
+def load_contacts(path=None):
+    contacts_path = path if path is not None else CONTACTS_FILE
+    try:
+        with open(contacts_path) as f:
+            contacts = []
+            for line in f:
+                line = line.rstrip("\n")
+                if not line or line.startswith("#"):
+                    continue
+                tokens = line.split()
+                if not tokens:
+                    continue
+                address = tokens[-1]
+                if "@" not in address or " " in address:
+                    continue
+                name = " ".join(tokens[:-1])
+                contacts.append((name, address))
+            return contacts
+    except FileNotFoundError:
+        return []
+
+
+def check_compose(to, subject, body, contacts):
+    valid_addresses = {addr for name, addr in contacts}
+    if to not in valid_addresses:
+        return "To address not in contacts list"
+    if not " ".join(subject.split()).strip():
+        return "Subject cannot be empty"
+    if not body.strip():
+        return "Body cannot be empty"
+    return ""
+
+
+def build_compose_payload(to, subject, body):
+    return {
+        "from": FROM_ADDR,
+        "to": [to],
+        "subject": " ".join(subject.split()),
+        "text": body
+    }
+
+
 def derive_reply_fields(raw):
     msg = message_from_string(raw)
 
@@ -236,7 +279,7 @@ def list_messages():
             f'<p><a href="/message?uid={e["uid"]}">{html.escape(e["from"])} \u2014 {html.escape(e["subject"])}{flag}{warn}</a><br>'
             f'{e["date"]}</p>'
         )
-    return page("Inbox", '<p><a href="/ticket.html">switcher</a></p><h3>Messages</h3>' + "".join(rows))
+    return page("Inbox", '<p><a href="/ticket.html">switcher</a> | <a href="/compose">compose</a></p><h3>Messages</h3>' + "".join(rows))
 
 
 @app.route("/hello.html")
@@ -398,6 +441,68 @@ def reply_submit():
         <p><strong>Send failed</strong></p>
         <p>{html.escape(result.stdout + result.stderr)}</p>
         <p><a href="/reply?uid={uid}">[try again]</a></p>
+        """)
+
+
+@app.route("/compose")
+def compose_form():
+    contacts = load_contacts()
+    if not contacts:
+        return page("Compose", "<p>No contacts configured.</p>")
+
+    options = "".join(
+        f'<option value="{html.escape(address)}">{html.escape(name)}</option>'
+        for name, address in contacts
+    )
+
+    body = f"""
+    <form action="/compose" method="POST">
+        <label>To: <select name="to" required>{options}</select></label><br>
+        <label>Subject: <input name="subject" required></label><br>
+        <label>Body: <textarea name="body" rows="6" required></textarea></label><br>
+        <input type="submit" value="Send">
+    </form>
+    <p><a href="/list">[cancel]</a></p>
+    """
+    return page("Compose", body)
+
+
+@app.route("/compose", method="POST")
+def compose_submit():
+    to = request.forms.to
+    subject = request.forms.subject
+    body = request.forms.body
+    contacts = load_contacts()
+
+    error = check_compose(to, subject, body, contacts)
+    if error:
+        return page("Compose error", f"""
+        <p>{html.escape(error)}</p>
+        <p><a href="/compose">[back]</a></p>
+        """)
+
+    payload = build_compose_payload(to, subject, body)
+
+    with open(REQUEST_JSON, "w") as f:
+        json.dump(payload, f, indent=2)
+
+    result = subprocess.run(
+        ["bash", SEND_SCRIPT, REQUEST_JSON],
+        capture_output=True, text=True
+    )
+
+    contact_name = next((name for name, addr in contacts if addr == to), to)
+
+    if result.returncode == 0:
+        return page("Sent", f"""
+        <p>Sent to {html.escape(contact_name)}</p>
+        <p><a href="/list">[list]</a></p>
+        """)
+    else:
+        return page("Send failed", f"""
+        <p><strong>Send failed</strong></p>
+        <p>{html.escape(result.stdout + result.stderr)}</p>
+        <p><a href="/compose">[try again]</a></p>
         """)
 
 
