@@ -18,6 +18,7 @@ SEND_SCRIPT = os.path.join(SCRIPT_DIR, "send_json.sh")
 FROM_ADDR = "hello@omegasemantic.org"
 CONTACTS_FILE = os.path.expanduser("~/.t9a_contacts")
 SEEN_FILE = os.path.join(SCRIPT_DIR, "seen.txt")
+HIDDEN_FILE = os.path.join(SCRIPT_DIR, "hidden.txt")
 UIDVALIDITY_FILE = os.path.expanduser("~/Mail/INBOX/.uidvalidity")
 
 SWITCH_SERVICES = {
@@ -70,6 +71,29 @@ def mark_seen(uid):
         with open(SEEN_FILE, "w") as f:
             f.write(read_validity() + "\n")
             for uid_str in sorted(seen, key=int):
+                f.write(uid_str + "\n")
+    except OSError:
+        pass
+
+
+def load_hidden():
+    try:
+        with open(HIDDEN_FILE) as f:
+            lines = f.read().splitlines()
+        if not lines or lines[0] != read_validity():
+            return set()
+        return set(lines[1:])
+    except Exception:
+        return set()
+
+
+def hide_uid(uid):
+    try:
+        hidden = load_hidden()
+        hidden.add(uid)
+        with open(HIDDEN_FILE, "w") as f:
+            f.write(read_validity() + "\n")
+            for uid_str in sorted(hidden, key=int):
                 f.write(uid_str + "\n")
     except OSError:
         pass
@@ -306,8 +330,11 @@ def root():
 def list_messages():
     entries = parse_headers()
     seen = load_seen()
+    hidden = load_hidden()
     rows = []
     for e in reversed(entries):
+        if e["uid"] in hidden:
+            continue
         is_unread = e["status"] == "unread" and e["uid"] not in seen
         flag = "(N) " if is_unread else ""
         warn = " !" if e.get("warning") else ""
@@ -401,6 +428,9 @@ def view_body():
     <strong>Date:</strong> {html.escape(entry['date'])}</p>
     <p>{rendered}</p>
     <p><a href="/reply?uid={uid}">[reply]</a> | <a href="/list">[list]</a></p>
+    <form action="/hide" method="POST">
+    <input type="hidden" name="uid" value="{uid}">
+    <input type="submit" value="Hide"></form>
     """
     return page(f"View {uid}", body)
 
@@ -480,6 +510,16 @@ def reply_submit():
         <p>{html.escape(result.stdout + result.stderr)}</p>
         <p><a href="/reply?uid={uid}">[try again]</a></p>
         """)
+
+
+@app.route("/hide", method="POST")
+def hide_message():
+    uid = request.forms.uid
+    if not uid.isdigit():
+        response.status = 404
+        return page("Not found", "<p>Not found.</p>")
+    hide_uid(uid)
+    redirect("/list", code=303)
 
 
 @app.route("/compose")
