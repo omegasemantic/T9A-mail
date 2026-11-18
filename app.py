@@ -17,6 +17,8 @@ REQUEST_JSON = os.path.join(SCRIPT_DIR, "request.json")
 SEND_SCRIPT = os.path.join(SCRIPT_DIR, "send_json.sh")
 FROM_ADDR = "hello@omegasemantic.org"
 CONTACTS_FILE = os.path.expanduser("~/.t9a_contacts")
+SEEN_FILE = os.path.join(SCRIPT_DIR, "seen.txt")
+UIDVALIDITY_FILE = os.path.expanduser("~/Mail/INBOX/.uidvalidity")
 
 SWITCH_SERVICES = {
     'mail': 't9amail-web.service',
@@ -42,6 +44,37 @@ def decode_mime_subject(raw_subject):
         return raw_subject
 
 
+def read_validity():
+    try:
+        with open(UIDVALIDITY_FILE) as f:
+            return f.readline().strip()
+    except Exception:
+        return ""
+
+
+def load_seen():
+    try:
+        with open(SEEN_FILE) as f:
+            lines = f.read().splitlines()
+        if not lines or lines[0] != read_validity():
+            return set()
+        return set(lines[1:])
+    except Exception:
+        return set()
+
+
+def mark_seen(uid):
+    try:
+        seen = load_seen()
+        seen.add(uid)
+        with open(SEEN_FILE, "w") as f:
+            f.write(read_validity() + "\n")
+            for uid_str in sorted(seen, key=int):
+                f.write(uid_str + "\n")
+    except OSError:
+        pass
+
+
 def parse_headers():
     entries = []
     current = {}
@@ -63,6 +96,7 @@ def parse_headers():
             elif line == "---":
                 entries.append(current)
                 current = {}
+    entries.sort(key=lambda e: int(e["uid"]))
     return entries
 
 
@@ -271,15 +305,17 @@ def root():
 @app.route("/list")
 def list_messages():
     entries = parse_headers()
+    seen = load_seen()
     rows = []
     for e in reversed(entries):
-        flag = " (N)" if e["status"] == "unread" else ""
+        is_unread = e["status"] == "unread" and e["uid"] not in seen
+        flag = "(N) " if is_unread else ""
         warn = " !" if e.get("warning") else ""
         rows.append(
-            f'<p><a href="/view?uid={e["uid"]}">{html.escape(e["from"])} \u2014 {html.escape(e["subject"])}{flag}{warn}</a><br>'
+            f'<p><a href="/view?uid={e["uid"]}">{flag}{html.escape(e["from"])} \u2014 {html.escape(e["subject"])}{warn}</a><br>'
             f'{html.escape(e["date"])}</p>'
         )
-    return page("Inbox", '<p><a href="/ticket.html">switcher</a> | <a href="/compose">compose</a></p><h3>Messages</h3>' + "".join(rows))
+    return page("Inbox", '<p><a href="/ticket.html">switcher</a> | <a href="/compose">compose</a> | <a href="/list">refresh</a></p><h3>Messages</h3>' + "".join(rows))
 
 
 @app.route("/hello.html")
@@ -351,6 +387,7 @@ def view_body():
     if not entry:
         response.status = 404
         return page("Not found", f"<p>UID {uid} not found.</p>")
+    mark_seen(uid)
 
     raw = generate_raw(uid)
     if raw is None:
