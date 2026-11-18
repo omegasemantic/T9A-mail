@@ -276,8 +276,8 @@ def list_messages():
         flag = " (N)" if e["status"] == "unread" else ""
         warn = " !" if e.get("warning") else ""
         rows.append(
-            f'<p><a href="/message?uid={e["uid"]}">{html.escape(e["from"])} \u2014 {html.escape(e["subject"])}{flag}{warn}</a><br>'
-            f'{e["date"]}</p>'
+            f'<p><a href="/view?uid={e["uid"]}">{html.escape(e["from"])} \u2014 {html.escape(e["subject"])}{flag}{warn}</a><br>'
+            f'{html.escape(e["date"])}</p>'
         )
     return page("Inbox", '<p><a href="/ticket.html">switcher</a> | <a href="/compose">compose</a></p><h3>Messages</h3>' + "".join(rows))
 
@@ -311,7 +311,7 @@ def message_view():
     if not uid.isdigit():
         response.status = 404
         return page("Not found", "<p>Not found.</p>")
-    return message_view_content(uid)
+    redirect(f"/view?uid={uid}", code=302)
 
 
 def message_view_content(uid):
@@ -360,9 +360,10 @@ def view_body():
 
     body = f"""
     <p><strong>From:</strong> {html.escape(entry['from'])}<br>
-    <strong>Subject:</strong> {html.escape(entry['subject'])}</p>
+    <strong>Subject:</strong> {html.escape(entry['subject'])}<br>
+    <strong>Date:</strong> {html.escape(entry['date'])}</p>
     <p>{rendered}</p>
-    <p><a href="/reply?uid={uid}">[reply]</a> | <a href="/message?uid={uid}">[back to message]</a></p>
+    <p><a href="/reply?uid={uid}">[reply]</a> | <a href="/list">[list]</a></p>
     """
     return page(f"View {uid}", body)
 
