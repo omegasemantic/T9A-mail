@@ -5,3 +5,4 @@ request.json
 sync_cron.log
 venv/
 __pycache__/
+seen.txt
