@@ -1,68 +1,27 @@
-# T9AMAIL
+# T9A
 
-Web email client for a HMD feature phone (Opera Mini Extreme, 2.4"
-screen). Part of T9A, a set of small apps for the phone; sibling apps
-live in their own repos (T9A-map, T9A-drive).
+Small web apps for using a HMD feature phone abroad, built for Opera
+Mini Extreme on a 2.4" screen. Pages are plain HTML, with no JS or
+reliance on CSS.
 
-Pages are plain HTML. Mail is read from a local copy, so the web app
-never makes IMAP calls.
-
-## What it does
-- Inbox (/list): newest first. "(N)" marks messages not yet opened on
-  the phone. Links at the top: switcher, compose, refresh.
-- Tap a message to see the body with From, Subject and Date (/view),
-  with [reply], [list] and a Hide button.
-- Reply: threaded reply to the sender.
-- Compose: new message to an address chosen from a contacts list
-  (~/.t9a_contacts, one `name address` per line). Only listed
-  addresses are accepted.
-- Read and hidden state are kept on the phone side only (seen.txt,
-  hidden.txt). Posteo is never changed. Both files are discarded if
-  the mailbox UIDVALIDITY changes, so a mailbox reset can't hide
-  new mail.
+## Apps (one repo each)
+- T9A-mail: read, reply and compose email (Posteo in, Resend out)
+- T9A-map: transit directions (Google Routes API)
+- T9A-drive: driving directions (Google Routes API)
 
 ## How it works
-- mbsync (cron, every minute via sync_cron.sh, with a lock file to
-  prevent overlap) pulls the Posteo INBOX into ~/Mail/INBOX. The sync
-  is pull-only. MaxMessages in ~/.mbsyncrc keeps the local copy small
-  on purpose: the app is for short, conversational messages, not an
-  archive.
-- pager.sh writes headers.txt (UID, read status, From, Subject, Date,
-  warning flag from classify_mail.py).
-- app.py (Bottle, port 80) lists, views, replies and composes.
-  Sender-controlled text is escaped, and uids must be numeric.
-- Messages are sent by send_json.sh, which POSTs to the Resend API.
-  From is hello@omegasemantic.org, which forwards to the Posteo
-  inbox. HTTPS is used because the VPS host blocks SMTP.
-- Only one of the T9A apps holds port 80 at a time. /switch/<name>
-  runs /root/restart, which stops the others and starts the one chosen.
+- Each app is a small Bottle app on a VPS. The phone only fetches HTML;
+  all API and mail work happens server-side.
+- Only one app holds port 80 at a time. A switcher page runs
+  `/root/restart <mail|map|drive>`, which stops the others and starts
+  the one chosen.
+- Secrets live outside git (~/.resendrc, ~/.mbsyncrc, per-app .env).
 
 ## Deploy
-Edit and commit on the dev machine, then push. On the server:
+Edit and commit on a dev machine, then push. On the server:
 
     git pull
-    ./venv/bin/python -m py_compile app.py && echo OK
-    /root/restart mail
+    ./venv/bin/python -m py_compile app.py && echo OK   # map: map.py
+    /root/restart <app>
 
-Only restart if OK printed. To switch back to another app:
-`/root/restart <app>`.
-
-## To rebuild on a new machine
-- Python venv with bottle: `python3 -m venv venv && venv/bin/pip install bottle`
-- ~/.resendrc containing RESEND_API_KEY=...  (never commit)
-- ~/.mbsyncrc for the Posteo account, plus the Maildir ~/Mail/INBOX
-- ~/.t9a_contacts for the compose dropdown
-- cron: `* * * * * <path>/sync_cron.sh`
-- systemd unit t9amail-web.service (runs `venv/bin/python app.py`)
-- /root/restart, the script behind the switcher
-- Timezone for terminal-tool dates defaults to Pacific/Auckland
-  (mail_helpers.sh)
-
-## Runtime files (gitignored, server only)
-headers.txt, mail.raw, request.json, sync_cron.log, seen.txt, hidden.txt
-
-## Files
-app.py, send_json.sh, static/ (web app); pager.sh, classify_mail.py,
-sync_cron.sh, mail_helpers.sh (sync pipeline); browser.sh, tmail.sh,
-reply.sh (older terminal client); webproto/ (superseded prototype);
-CLAUDE.md, TODO (working notes).
+Only restart if OK printed.
