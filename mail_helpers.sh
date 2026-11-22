@@ -37,7 +37,7 @@ except Exception:
 # "Thu, 9 Jul 2026 08:04:16 +1200" -> "WED 15/07/26 0804"
 trim_date() {
     local raw="$1"
-    local tz="${timezone:-Pacific/Auckland}"
+    local tz; tz=$(cat "$HOME/.t9a_timezone" 2>/dev/null); tz="${tz:-${timezone:-Pacific/Auckland}}"
     if command -v python3 >/dev/null 2>&1; then
         echo "$raw" | tz="$tz" python3 -c "
 import sys, os
